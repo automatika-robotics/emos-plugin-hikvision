@@ -1,4 +1,4 @@
-# hikmicro_plugin
+# Hikvision Sensor Plugin for EMOS
 
 An EMOS sensor plugin for Hikvision network PTZ cameras, with the thermal stream and radiometric thermometry of the HIKMICRO bi-spectrum models on top. The camera attaches to a recipe next to the robot plugin and is placed with a `Mount`, on the robot or fixed in the environment. Video is read in the plugin itself over RTSP and put on Sugarcoat's feedback bus, the head is aimed over Hikvision's ISAPI HTTP API, and every PTZ command is an action a recipe or Cortex can call.
 
