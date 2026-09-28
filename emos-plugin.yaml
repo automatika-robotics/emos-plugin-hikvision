@@ -1,0 +1,5 @@
+# EMOS plugin manifest
+deps:
+  system:
+    conda: [ffmpeg]   # camera decode child process (ffmpeg + ffprobe)
+    apt: [ffmpeg]
