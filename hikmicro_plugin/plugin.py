@@ -386,9 +386,12 @@ class HikmicroBispectrum(HikvisionPtzCamera):
     THERMAL_MAX_FPS = 15.0
     #: ISAPI thermometry addresses the thermal sensor as metering channel 2.
     THERMAL_METERING_CHANNEL = 2
-    #: ISAPI path for one thermometry read; ``{chan}`` is the metering channel.
-    #: Model specific: confirm on the unit at bring-up.
-    THERMOMETRY_PATH = "/ISAPI/Thermal/channels/{chan}/thermometry/1/rules"
+    #: ISAPI path of a multipart stream of readings for thermometry. One part is taken per read.
+    #: ``{chan}`` is the metering channel
+    #: NOTE: Verified on an HM-TD5537T (firmware V5.5.141).
+    THERMOMETRY_PATH = (
+        "/ISAPI/Thermal/channels/{chan}/thermometry/realTimethermometry/rules"
+    )
     #: Radiometric temperature poll rate (Hz) and default over-temp threshold.
     THERMOMETRY_POLL_HZ = 1.0
     OVER_TEMPERATURE_C = 60.0
@@ -501,8 +504,8 @@ class HikmicroBispectrum(HikvisionPtzCamera):
     def _read_max_temperature(self) -> Optional[float]:
         """One ISAPI thermometry read -> hottest temperature in deg C (or None)."""
         path = self.THERMOMETRY_PATH.format(chan=self.THERMAL_METERING_CHANNEL)
-        resp = self._isapi.get(path, params={"format": "json"})
-        return parse_max_temperature(resp.text)
+        body = self._isapi.get_first_part(path, params={"format": "json"})
+        return parse_max_temperature(body)
 
     def _make_over_temperature_event(self, threshold: Optional[float] = None) -> Event:
         """Fire when the hottest point in the thermal scene exceeds a threshold.

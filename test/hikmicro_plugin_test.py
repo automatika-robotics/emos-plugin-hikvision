@@ -342,9 +342,9 @@ class _RecordingThermalIsapi:
         self._body = body
         self.gets = []
 
-    def get(self, path, params=None):
+    def get_first_part(self, path, params=None):
         self.gets.append((path, params))
-        return type("Resp", (), {"text": self._body})()
+        return self._body
 
 
 def test_thermometry_feedback_exposed():
@@ -371,8 +371,72 @@ def test_read_max_temperature_hits_isapi_channel_2():
     bi._isapi = _RecordingThermalIsapi('{"maxTemperature": 44.4}')
     assert bi._read_max_temperature() == 44.4
     path, params = bi._isapi.gets[-1]
-    assert path == "/ISAPI/Thermal/channels/2/thermometry/1/rules"
+    assert path == "/ISAPI/Thermal/channels/2/thermometry/realTimethermometry/rules"
     assert params == {"format": "json"}
+
+
+# --- ISAPI client: first part of a stream ---------------------------------
+
+_PART = (
+    b'--boundary\r\nContent-Type: application/json; charset="UTF-8"\r\n'
+    b"Content-Length: %d\r\n\r\n%s\r\n"
+)
+
+
+def _part(payload: bytes) -> bytes:
+    return _PART % (len(payload), payload)
+
+
+def test_first_multipart_part_waits_for_the_whole_part():
+    from hikmicro_plugin.isapi import first_multipart_part
+
+    whole = _part(b'{"MaxTemperature": 26.4}')
+    assert first_multipart_part(whole[:-10]) is None
+    assert first_multipart_part(whole) == b'{"MaxTemperature": 26.4}'
+    # without a length the part runs to the next boundary line
+    no_len = b'--boundary\r\nContent-Type: application/json\r\n\r\n{"a": 1}\r\n--boundary\r\n'
+    assert first_multipart_part(no_len) == b'{"a": 1}'
+    assert first_multipart_part(b"--boundary\r\nContent-Type: x\r\n\r\n{") is None
+
+
+def _streaming_client(chunks, content_type, status=200):
+    """An IsapiClient whose HTTP goes to a canned streaming response."""
+    httpx = pytest.importorskip("httpx")
+    from hikmicro_plugin.isapi import IsapiClient
+
+    pulled = []
+
+    class _Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            for chunk in chunks:
+                pulled.append(chunk)
+                yield chunk
+
+    def handler(request):
+        return httpx.Response(status, headers={"content-type": content_type}, stream=_Stream())
+
+    client = IsapiClient("http://cam", "admin", "pw")
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    return client, pulled
+
+
+def test_get_first_part_stops_after_one_part_of_an_endless_stream():
+    first = _part(b'{"MaxTemperature": 26.4}')
+    later = [_part(b'{"MaxTemperature": 99.0}')] * 50
+    client, pulled = _streaming_client([first] + later, "multipart/form-data; boundary=boundary")
+    assert client.get_first_part("/x", params={"format": "json"}) == '{"MaxTemperature": 26.4}'
+    assert len(pulled) < 10  # the rest of the stream was never read
+
+
+def test_get_first_part_returns_a_plain_body_whole():
+    client, _ = _streaming_client([b'{"maxTemperature": 44.4}'], "application/json")
+    assert client.get_first_part("/x") == '{"maxTemperature": 44.4}'
+
+
+def test_get_first_part_raises_on_http_error():
+    client, _ = _streaming_client([b"<ResponseStatus>notSupport</ResponseStatus>"], "application/xml", status=403)
+    with pytest.raises(IsapiError, match="HTTP 403"):
+        client.get_first_part("/x")
 
 
 def test_base_has_no_thermometry():
